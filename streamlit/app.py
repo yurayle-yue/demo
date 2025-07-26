@@ -18,11 +18,11 @@ st.set_page_config(
     layout="centered"
 )
 
-# Lokasi file untuk menyimpan data pengguna (simulasi database)
+# Lokasi file
 USER_DATA_FILE = "data/users.json"
 SCAN_HISTORY_DIR = "data/scan_history_images/"
 
-# Inisialisasi file & folder jika belum ada
+# Inisialisasi folder & file
 os.makedirs("models", exist_ok=True)
 os.makedirs("data", exist_ok=True)
 os.makedirs(SCAN_HISTORY_DIR, exist_ok=True)
@@ -30,7 +30,7 @@ if not os.path.exists(USER_DATA_FILE):
     with open(USER_DATA_FILE, 'w') as f:
         json.dump({}, f)
 
-# Contoh Database Gizi
+# Database Gizi Sederhana
 NUTRITION_DB = {
     'apple': {'Kalori': 52, 'Karbohidrat (g)': 14, 'Protein (g)': 0.3, 'Lemak (g)': 0.2},
     'banana': {'Kalori': 89, 'Karbohidrat (g)': 23, 'Protein (g)': 1.1, 'Lemak (g)': 0.3},
@@ -39,7 +39,7 @@ NUTRITION_DB = {
 FOOD_CLASSES = {0: 'background', 1: 'apple', 2: 'banana', 3: 'pizza'}
 
 # =====================================================================================
-# FUNGSI MANAJEMEN PENGGUNA & DATA
+# FUNGSI MANAJEMEN PENGGUNA
 # =====================================================================================
 def hash_password(password):
     return hashlib.sha256(str.encode(password)).hexdigest()
@@ -114,56 +114,32 @@ symptoms_mapping = {
 }
 
 # =====================================================================================
-# FUNGSI MEMUAT MODEL (VERSI DIPERBARUI DENGAN CUSTOM ADAM)
+# FUNGSI MEMUAT MODEL (VERSI FINAL)
 # =====================================================================================
-
-# Kelas ini akan menangani perbedaan versi optimizer Adam
-class CustomAdam(tf.keras.optimizers.Optimizer):
-    def __init__(self, name="Adam", **kwargs):
-        super().__init__(name, **kwargs)
+@st.cache_resource
+def load_model_for_inference(model_path):
+    """Fungsi umum untuk memuat model H5 hanya untuk prediksi."""
+    if not os.path.exists(model_path):
+        st.error(f"File model tidak ditemukan di: {model_path}")
+        return None
+    try:
+        # Cara paling aman: muat tanpa mengkompilasi optimizer.
+        return tf.keras.models.load_model(model_path, compile=False)
+    except Exception as e:
+        st.error(f"Gagal memuat model dari {model_path}. Error: {e}")
+        return None
 
 @st.cache_resource
-def load_symptoms_model():
-    """Memuat model prediksi gejala."""
-    model_path = 'models/symptoms_predict_model.h5'
+def get_symptoms_data():
+    """Memuat data pendukung untuk model gejala."""
     labels_path = 'models/symptoms_labels.json'
-    if not (os.path.exists(model_path) and os.path.exists(labels_path)):
-        st.error(f"File '{model_path}' atau '{labels_path}' tidak ditemukan.")
-        return None, None, None
-    try:
-        custom_objects = {'Adam': CustomAdam}
-        model = tf.keras.models.load_model(model_path, custom_objects=custom_objects, compile=False)
-        symptoms_idx = {symptom: idx for idx, symptom in enumerate(sorted(symptoms_mapping.values()))}
-        with open(labels_path, 'r') as f:
-            disease_mapping = json.load(f)
-        return model, symptoms_idx, disease_mapping
-    except Exception as e:
-        st.error(f"Gagal memuat model gejala: {e}")
-        return None, None, None
-
-@st.cache_resource
-def load_disease_model():
-    """Memuat model prediksi penyakit."""
-    model_path = 'models/disease-prediction-tf-model.h5'
-    if not os.path.exists(model_path):
-        st.error(f"File '{model_path}' tidak ditemukan.")
-        return None
-    try:
-        custom_objects = {'Adam': CustomAdam}
-        return tf.keras.models.load_model(model_path, custom_objects=custom_objects, compile=False)
-    except Exception as e:
-        st.error(f"Gagal memuat model penyakit: {e}")
-        return None
-
-@st.cache_resource
-def load_food_detection_model():
-    """Memuat model deteksi makanan (Mask R-CNN)."""
-    model_path = 'models/mrcnn_food_detection.h5'
-    if not os.path.exists(model_path):
-        st.warning(f"Model deteksi makanan '{model_path}' tidak ditemukan. Fitur ini tidak akan berfungsi.")
-        return None
-    st.warning("Pemuatan model Mask R-CNN adalah placeholder. Ganti dengan kode yang sesuai dari library Anda.")
-    return "placeholder"
+    if not os.path.exists(labels_path):
+        st.error(f"File label tidak ditemukan di: {labels_path}")
+        return None, None
+    symptoms_idx = {symptom: idx for idx, symptom in enumerate(sorted(symptoms_mapping.values()))}
+    with open(labels_path, 'r') as f:
+        disease_mapping = json.load(f)
+    return symptoms_idx, disease_mapping
 
 # =====================================================================================
 # HALAMAN-HALAMAN APLIKASI
@@ -192,8 +168,10 @@ def display_dashboard():
     if image_file: handle_food_scan(image_file)
 
 def handle_food_scan(image_file):
-    food_model = load_food_detection_model()
-    if food_model is None: return
+    food_model = load_model_for_inference('models/mrcnn_food_detection.h5')
+    if food_model is None: 
+        st.warning("Fitur deteksi makanan tidak aktif karena model tidak ditemukan.")
+        return
     image = Image.open(image_file)
     col1, col2 = st.columns(2)
     with col1: st.image(image, caption="Gambar yang dianalisis", use_column_width=True)
@@ -218,8 +196,11 @@ def handle_food_scan(image_file):
 
 def symptoms_analysis_page():
     st.title("🩺 Analisis Penyakit Berdasarkan Gejala")
-    model, symptoms_idx, disease_mapping = load_symptoms_model()
-    if model is None: return
+    model = load_model_for_inference('models/symptoms_predict_model.h5')
+    symptoms_idx, disease_mapping = get_symptoms_data()
+    
+    if model is None or symptoms_idx is None: return
+
     if 'selected_symptoms' not in st.session_state: st.session_state.selected_symptoms = []
     col1, col2 = st.columns([1, 1])
     with col1:
@@ -255,7 +236,7 @@ def disease_prediction_page():
         return
     st.info("Data kesehatan yang digunakan:"); st.json(health_data)
     if st.button("Jalankan Prediksi Risiko", type="primary"):
-        model = load_disease_model()
+        model = load_model_for_inference('models/disease-prediction-tf-model.h5')
         if model is None: return
         height = health_data['Tinggi Badan (cm)']; weight = health_data['Berat Badan (kg)']
         gender_binary = 1 if health_data['Jenis Kelamin'] == 'Laki-laki' else 0
