@@ -15,7 +15,7 @@ import datetime
 st.set_page_config(
     page_title="Nutrisense: Solusi Cerdas",
     page_icon="🥗",
-    layout="centered" # 'centered' lebih baik untuk form login/register
+    layout="centered"
 )
 
 # Lokasi file untuk menyimpan data pengguna (simulasi database)
@@ -55,22 +55,17 @@ def save_users(users_data):
 def save_scan_history(email, image_path, detected_foods, nutrition_info):
     users = load_users()
     user_data = users.get(email, {})
-    
-    if 'scan_history' not in user_data:
-        user_data['scan_history'] = []
-        
+    if 'scan_history' not in user_data: user_data['scan_history'] = []
     scan_record = {
         "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "image_path": image_path,
-        "detected_foods": detected_foods,
-        "nutrition_info": nutrition_info
+        "image_path": image_path, "detected_foods": detected_foods, "nutrition_info": nutrition_info
     }
     user_data['scan_history'].append(scan_record)
     users[email] = user_data
     save_users(users)
 
 # =====================================================================================
-# MAPPING GEJALA (DARI KODE ANDA)
+# MAPPING GEJALA
 # =====================================================================================
 symptoms_mapping = {
     'gatal': 'itching', 'ruam kulit': 'skin_rash', 'benjolan pada kulit': 'nodal_skin_eruptions',
@@ -119,19 +114,24 @@ symptoms_mapping = {
 }
 
 # =====================================================================================
-# FUNGSI MEMUAT MODEL (DENGAN CACHING) - VERSI DIPERBARUI
+# FUNGSI MEMUAT MODEL (VERSI DIPERBARUI DENGAN CUSTOM ADAM)
 # =====================================================================================
+
+# Kelas ini akan menangani perbedaan versi optimizer Adam
+class CustomAdam(tf.keras.optimizers.Optimizer):
+    def __init__(self, name="Adam", **kwargs):
+        super().__init__(name, **kwargs)
 
 @st.cache_resource
 def load_symptoms_model():
-    """Memuat model prediksi gejala dengan legacy Adam optimizer."""
+    """Memuat model prediksi gejala."""
     model_path = 'models/symptoms_predict_model.h5'
     labels_path = 'models/symptoms_labels.json'
     if not (os.path.exists(model_path) and os.path.exists(labels_path)):
-        st.error(f"File model '{model_path}' atau '{labels_path}' tidak ditemukan.")
+        st.error(f"File '{model_path}' atau '{labels_path}' tidak ditemukan.")
         return None, None, None
     try:
-        custom_objects = {'Adam': tf.keras.optimizers.legacy.Adam}
+        custom_objects = {'Adam': CustomAdam}
         model = tf.keras.models.load_model(model_path, custom_objects=custom_objects, compile=False)
         symptoms_idx = {symptom: idx for idx, symptom in enumerate(sorted(symptoms_mapping.values()))}
         with open(labels_path, 'r') as f:
@@ -143,13 +143,13 @@ def load_symptoms_model():
 
 @st.cache_resource
 def load_disease_model():
-    """Memuat model prediksi penyakit dengan legacy Adam optimizer."""
+    """Memuat model prediksi penyakit."""
     model_path = 'models/disease-prediction-tf-model.h5'
     if not os.path.exists(model_path):
-        st.error(f"File model '{model_path}' tidak ditemukan.")
+        st.error(f"File '{model_path}' tidak ditemukan.")
         return None
     try:
-        custom_objects = {'Adam': tf.keras.optimizers.legacy.Adam}
+        custom_objects = {'Adam': CustomAdam}
         return tf.keras.models.load_model(model_path, custom_objects=custom_objects, compile=False)
     except Exception as e:
         st.error(f"Gagal memuat model penyakit: {e}")
@@ -163,24 +163,20 @@ def load_food_detection_model():
         st.warning(f"Model deteksi makanan '{model_path}' tidak ditemukan. Fitur ini tidak akan berfungsi.")
         return None
     st.warning("Pemuatan model Mask R-CNN adalah placeholder. Ganti dengan kode yang sesuai dari library Anda.")
-    return "placeholder" # Return string agar tidak error, ganti dengan model asli
+    return "placeholder"
 
 # =====================================================================================
 # HALAMAN-HALAMAN APLIKASI
 # =====================================================================================
-
 def main_dashboard():
-    st.set_page_config(layout="wide") # Ganti layout untuk dashboard
+    st.set_page_config(layout="wide")
     st.sidebar.success(f"Login sebagai: {st.session_state['email']}")
-    
     page = st.sidebar.radio("Menu Utama", ["🏠 Dashboard", "🩺 Analisis Gejala", "🔬 Prediksi Risiko Penyakit", "📖 Riwayat Scan", "⚙️ Pengaturan"])
-
     if page == "🏠 Dashboard": display_dashboard()
     elif page == "🩺 Analisis Gejala": symptoms_analysis_page()
     elif page == "🔬 Prediksi Risiko Penyakit": disease_prediction_page()
     elif page == "📖 Riwayat Scan": history_page()
     elif page == "⚙️ Pengaturan": settings_page()
-
     if st.sidebar.button("Logout"):
         st.session_state.logged_in = False
         st.session_state.email = None
@@ -190,45 +186,31 @@ def display_dashboard():
     st.title(f"Selamat Datang, {st.session_state['name']}! 👋")
     st.write("Pusat kendali kesehatan dan nutrisi Anda. Apa yang ingin Anda lakukan hari ini?")
     st.divider()
-
     st.header("📸 Analisis Gizi Makanan Anda")
     st.write("Gunakan kamera atau unggah gambar untuk mengetahui kandungan gizi makanan Anda secara instan.")
-    
     image_file = st.file_uploader("Unggah gambar makanan...", type=['jpg', 'jpeg', 'png'], key="dashboard_uploader")
-    
-    if image_file:
-        handle_food_scan(image_file)
+    if image_file: handle_food_scan(image_file)
 
 def handle_food_scan(image_file):
     food_model = load_food_detection_model()
     if food_model is None: return
-
     image = Image.open(image_file)
     col1, col2 = st.columns(2)
-    with col1:
-        st.image(image, caption="Gambar yang dianalisis", use_column_width=True)
-
+    with col1: st.image(image, caption="Gambar yang dianalisis", use_column_width=True)
     with col2:
         with st.spinner("Menganalisis makanan..."):
-            # Placeholder untuk logika prediksi Mask R-CNN
             simulated_detected_foods = ['pizza', 'apple'] 
-            
             st.subheader("✅ Makanan Terdeteksi & Info Gizi")
             all_nutrition_info = {}
-            if not simulated_detected_foods:
-                st.warning("Tidak ada makanan yang dapat dikenali.")
+            if not simulated_detected_foods: st.warning("Tidak ada makanan yang dapat dikenali.")
             else:
                 for food_name in simulated_detected_foods:
                     nutrition_info = NUTRITION_DB.get(food_name.lower())
                     if nutrition_info:
                         st.success(f"**{food_name.capitalize()}**")
-                        df = pd.DataFrame([nutrition_info])
-                        st.dataframe(df)
+                        st.dataframe(pd.DataFrame([nutrition_info]))
                         all_nutrition_info[food_name] = nutrition_info
-                    else:
-                        st.error(f"Info gizi untuk {food_name.capitalize()} tidak ditemukan.")
-            
-            # Simpan ke riwayat
+                    else: st.error(f"Info gizi untuk {food_name.capitalize()} tidak ditemukan.")
             img_path = os.path.join(SCAN_HISTORY_DIR, f"{st.session_state['email'].split('@')[0]}_{int(datetime.datetime.now().timestamp())}.png")
             image.save(img_path)
             save_scan_history(st.session_state['email'], img_path, simulated_detected_foods, all_nutrition_info)
@@ -236,154 +218,112 @@ def handle_food_scan(image_file):
 
 def symptoms_analysis_page():
     st.title("🩺 Analisis Penyakit Berdasarkan Gejala")
-    st.write("Pilih gejala yang Anda rasakan untuk mendapatkan prediksi awal penyakit.")
-
     model, symptoms_idx, disease_mapping = load_symptoms_model()
     if model is None: return
-
-    if 'selected_symptoms' not in st.session_state:
-        st.session_state.selected_symptoms = []
-
+    if 'selected_symptoms' not in st.session_state: st.session_state.selected_symptoms = []
     col1, col2 = st.columns([1, 1])
     with col1:
         st.subheader("Pilih Gejala Anda:")
-        selected = st.multiselect("Anda bisa memilih lebih dari satu gejala", list(symptoms_mapping.keys()), default=st.session_state.selected_symptoms)
-        st.session_state.selected_symptoms = selected
-
+        st.session_state.selected_symptoms = st.multiselect("Bisa pilih lebih dari satu", list(symptoms_mapping.keys()), default=st.session_state.selected_symptoms)
     with col2:
         st.subheader("Gejala yang Dipilih:")
-        if not st.session_state.selected_symptoms:
-            st.warning("Belum ada gejala yang dipilih.")
+        if not st.session_state.selected_symptoms: st.warning("Belum ada gejala dipilih.")
         else:
-            for symptom in st.session_state.selected_symptoms:
-                st.info(f"• {symptom}")
-
+            for symptom in st.session_state.selected_symptoms: st.info(f"• {symptom}")
     if st.button("Analisis Penyakit Sekarang", type="primary"):
         if st.session_state.selected_symptoms:
             input_symptoms = np.zeros(132)
             for symptom in st.session_state.selected_symptoms:
                 english_symptom = symptoms_mapping.get(symptom)
-                if english_symptom in symptoms_idx:
-                    input_symptoms[symptoms_idx[english_symptom]] = 1
-
+                if english_symptom in symptoms_idx: input_symptoms[symptoms_idx[english_symptom]] = 1
             predictions = model.predict(np.array([input_symptoms]))
             top_3_indices = np.argsort(predictions[0])[-3:][::-1]
-            
             st.subheader("Hasil Analisis:")
             for i, idx in enumerate(top_3_indices):
                 disease_name = disease_mapping["idx_to_disease"][str(idx)]
                 probability = predictions[0][idx] * 100
-                st.success(f"**{i+1}. {disease_name}** (Tingkat keyakinan: {probability:.2f}%)")
-        else:
-            st.error("Silakan pilih minimal satu gejala.")
+                st.success(f"**{i+1}. {disease_name}** (Keyakinan: {probability:.2f}%)")
+        else: st.error("Silakan pilih minimal satu gejala.")
 
 def disease_prediction_page():
     st.title("🔬 Prediksi Risiko Penyakit Kronis")
-    st.write("Prediksi ini dibuat berdasarkan data kesehatan yang telah Anda simpan di profil.")
-    
-    users = load_users()
-    user_data = users[st.session_state['email']]
+    st.write("Prediksi dibuat berdasarkan data kesehatan di profil Anda.")
+    user_data = load_users()[st.session_state['email']]
     health_data = user_data.get('health_data')
-
     if not health_data:
-        st.warning("Anda belum memasukkan data kesehatan. Silakan lengkapi di halaman Pengaturan.")
+        st.warning("Lengkapi data kesehatan di halaman Pengaturan.")
         return
-
-    st.info("Data kesehatan yang digunakan untuk analisis:")
-    st.json(health_data)
-
+    st.info("Data kesehatan yang digunakan:"); st.json(health_data)
     if st.button("Jalankan Prediksi Risiko", type="primary"):
         model = load_disease_model()
         if model is None: return
-        
-        height = health_data['Tinggi Badan (cm)']
-        weight = health_data['Berat Badan (kg)']
+        height = health_data['Tinggi Badan (cm)']; weight = health_data['Berat Badan (kg)']
         gender_binary = 1 if health_data['Jenis Kelamin'] == 'Laki-laki' else 0
-        age = health_data['Usia']
-        bp = health_data['Tekanan Darah Sistolik (mmHg)']
-        chol = health_data['Kolesterol Total (mg/dL)']
-        glucose = health_data['Gula Darah Puasa (mg/dL)']
-        
-        height_m = height / 100
-        bmi = weight / (height_m ** 2)
+        age = health_data['Usia']; bp = health_data['Tekanan Darah Sistolik (mmHg)']
+        chol = health_data['Kolesterol Total (mg/dL)']; glucose = health_data['Gula Darah Puasa (mg/dL)']
+        bmi = weight / ((height / 100) ** 2)
         bmi_category = 0 if bmi < 18.5 else 1 if bmi < 25 else 2 if bmi < 30 else 3
         age_category = 0 if age < 30 else 1 if age < 45 else 2 if age < 60 else 3
         bp_category = 0 if bp < 120 else 1 if bp < 140 else 2 if bp < 160 else 3
-        
         features = np.array([[height, weight, gender_binary, age, bp, chol, glucose, bmi, bmi_category, age_category, bp_category, bmi * age, bp * age, bmi * bp, weight * 20]])
-        
         predictions = model.predict(features)
-        
         st.subheader("Potensi Risiko Penyakit:")
         diseases = ['Anemia', 'Kolesterol Tinggi', 'Gagal Ginjal Kronis', 'Diabetes', 'Penyakit Jantung', 'Hipertensi', 'Sindrom Metabolik', 'Perlemakan Hati', 'Obesitas', 'Stroke']
-        high_risk_diseases = [f"• **{diseases[i]}** ({predictions[0][i]*100:.1f}%)" for i, prob in enumerate(predictions[0]) if prob > 0.5]
-        
-        if high_risk_diseases:
-            for risk in high_risk_diseases: st.error(risk)
-        else:
-            st.success("✅ Tidak ada risiko penyakit kronis yang signifikan terdeteksi.")
+        high_risk = [f"• **{diseases[i]}** ({predictions[0][i]*100:.1f}%)" for i, prob in enumerate(predictions[0]) if prob > 0.5]
+        if high_risk:
+            for risk in high_risk: st.error(risk)
+        else: st.success("✅ Tidak ada risiko penyakit kronis yang signifikan terdeteksi.")
 
 def history_page():
     st.title("📖 Riwayat Scan Makanan")
-    users = load_users()
-    history = users[st.session_state['email']].get('scan_history', [])
-
+    history = load_users()[st.session_state['email']].get('scan_history', [])
     if not history:
         st.info("Anda belum memiliki riwayat scan.")
         return
-
     for record in reversed(history):
         with st.expander(f"**Scan pada:** {record['timestamp']}"):
             col1, col2 = st.columns([1,2])
             with col1:
                 if os.path.exists(record['image_path']): st.image(record['image_path'])
             with col2:
-                st.write("**Makanan Terdeteksi:**", ", ".join(record['detected_foods']))
+                st.write("**Makanan:**", ", ".join(record['detected_foods']))
                 for food, nutrition in record['nutrition_info'].items():
                     st.write(f"**Gizi {food.capitalize()}:**"); st.json(nutrition)
 
 def settings_page():
     st.title("⚙️ Pengaturan Profil dan Kesehatan")
-    users = load_users()
-    user_data = users[st.session_state['email']]
-
+    users = load_users(); user_data = users[st.session_state['email']]
     with st.form("settings_form"):
         st.subheader("Data Pribadi"); name = st.text_input("Nama", value=user_data.get('name', ''))
         st.subheader("Data Kesehatan")
         health_data = user_data.get('health_data', {})
         h_col1, h_col2 = st.columns(2)
         with h_col1:
-            height = h_col1.number_input('Tinggi Badan (cm)', min_value=100, value=health_data.get('Tinggi Badan (cm)', 160))
-            weight = h_col1.number_input('Berat Badan (kg)', min_value=30, value=health_data.get('Berat Badan (kg)', 60))
+            height = h_col1.number_input('Tinggi Badan (cm)', 100, value=health_data.get('Tinggi Badan (cm)', 160))
+            weight = h_col1.number_input('Berat Badan (kg)', 30, value=health_data.get('Berat Badan (kg)', 60))
             gender = h_col1.selectbox('Jenis Kelamin', ['Laki-laki', 'Perempuan'], index=0 if health_data.get('Jenis Kelamin', 'Laki-laki') == 'Laki-laki' else 1)
         with h_col2:
-            age = h_col2.number_input('Usia', min_value=1, value=health_data.get('Usia', 25))
-            bp = h_col2.number_input('Tekanan Darah Sistolik', min_value=70, value=health_data.get('Tekanan Darah Sistolik (mmHg)', 120))
-            chol = h_col2.number_input('Kolesterol Total', min_value=100, value=health_data.get('Kolesterol Total (mg/dL)', 180))
-            glucose = h_col2.number_input('Gula Darah Puasa', min_value=50, value=health_data.get('Gula Darah Puasa (mg/dL)', 90))
-
+            age = h_col2.number_input('Usia', 1, value=health_data.get('Usia', 25))
+            bp = h_col2.number_input('Tekanan Darah Sistolik', 70, value=health_data.get('Tekanan Darah Sistolik (mmHg)', 120))
+            chol = h_col2.number_input('Kolesterol Total', 100, value=health_data.get('Kolesterol Total (mg/dL)', 180))
+            glucose = h_col2.number_input('Gula Darah Puasa', 50, value=health_data.get('Gula Darah Puasa (mg/dL)', 90))
         if st.form_submit_button("Simpan Perubahan", type="primary"):
             users[st.session_state['email']]['name'] = name
             users[st.session_state['email']]['health_data'] = {'Tinggi Badan (cm)': height, 'Berat Badan (kg)': weight, 'Jenis Kelamin': gender, 'Usia': age, 'Tekanan Darah Sistolik (mmHg)': bp, 'Kolesterol Total (mg/dL)': chol, 'Gula Darah Puasa (mg/dL)': glucose}
-            save_users(users)
-            st.success("Data berhasil diperbarui!")
+            save_users(users); st.success("Data berhasil diperbarui!")
 
 def initial_health_data_entry():
     st.title("Satu Langkah Lagi!"); st.header("Masukkan Data Kesehatan Awal Anda")
     with st.form("initial_health_form"):
         h_col1, h_col2 = st.columns(2)
         with h_col1:
-            height = h_col1.number_input('Tinggi Badan (cm)', 160); weight = h_col1.number_input('Berat Badan (kg)', 60); gender = h_col1.selectbox('Jenis Kelamin', ['Laki-laki', 'Perempuan'])
+            height=h_col1.number_input('Tinggi Badan (cm)',160); weight=h_col1.number_input('Berat Badan (kg)',60); gender=h_col1.selectbox('Jenis Kelamin',['Laki-laki','Perempuan'])
         with h_col2:
-            age = h_col2.number_input('Usia', 25); bp = h_col2.number_input('Tekanan Darah Sistolik', 120); chol = h_col2.number_input('Kolesterol Total', 180); glucose = h_col2.number_input('Gula Darah Puasa', 90)
+            age=h_col2.number_input('Usia',25); bp=h_col2.number_input('Tekanan Darah Sistolik',120); chol=h_col2.number_input('Kolesterol Total',180); glucose=h_col2.number_input('Gula Darah Puasa',90)
         if st.form_submit_button("Simpan dan Lanjutkan", type="primary"):
             health_data = {'Tinggi Badan (cm)': height, 'Berat Badan (kg)': weight, 'Jenis Kelamin': gender, 'Usia': age, 'Tekanan Darah Sistolik (mmHg)': bp, 'Kolesterol Total (mg/dL)': chol, 'Gula Darah Puasa (mg/dL)': glucose}
             users = load_users(); users[st.session_state['email']]['health_data'] = health_data
             save_users(users); st.rerun()
-            
-# =====================================================================================
-# HALAMAN LOGIN & REGISTER
-# =====================================================================================
 
 def auth_page():
     st.title("Selamat Datang di Nutrisense 🥗")
@@ -397,7 +337,6 @@ def auth_page():
                     st.session_state.logged_in = True; st.session_state.email = email; st.session_state.name = users[email].get('name', email)
                     st.rerun()
                 else: st.error("Email atau password salah.")
-
     with register_tab:
         with st.form("register_form"):
             name = st.text_input("Nama Lengkap"); email = st.text_input("Email Baru"); password = st.text_input("Buat Password", type="password"); confirm_password = st.text_input("Konfirmasi Password", type="password")
@@ -419,7 +358,7 @@ if "logged_in" not in st.session_state:
 if not st.session_state.logged_in:
     auth_page()
 else:
-    if load_users()[st.session_state.email].get("health_data") is None:
+    if load_users().get(st.session_state.email, {}).get("health_data") is None:
         initial_health_data_entry()
     else:
         main_dashboard()
