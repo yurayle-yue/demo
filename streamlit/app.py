@@ -4,40 +4,37 @@ import numpy as np
 import pandas as pd
 import json
 import os
+from PIL import Image # Ditambahkan untuk memproses gambar
 
-# Set page config
+# Konfigurasi Halaman Aplikasi
 st.set_page_config(
     page_title="Health Prediction App",
     page_icon="🏥",
     layout="wide"
 )
 
-# Load models and data
+# --- FUNGSI UNTUK MEMUAT MODEL (DENGAN CACHE) ---
+
 @st.cache_resource
 def load_symptoms_model():
-    # Custom optimizer configuration to handle potential loading issues
+    # Konfigurasi kustom untuk optimizer Adam
     class CustomAdam(tf.keras.optimizers.Adam):
         def __init__(self, *args, **kwargs):
-            # Remove parameters not recognized by the standard loader
-            for param in ['weight_decay', 'use_ema', 'ema_momentum', 'ema_overwrite_frequency', 'jit_compile', 'is_legacy_optimizer']:
+            params_to_remove = ['weight_decay', 'use_ema', 'ema_momentum', 'ema_overwrite_frequency', 'jit_compile', 'is_legacy_optimizer']
+            for param in params_to_remove:
                 if param in kwargs:
                     del kwargs[param]
             super().__init__(*args, **kwargs)
     
-    custom_objects = {
-        'Custom>Adam': CustomAdam
-    }
+    custom_objects = {'Custom>Adam': CustomAdam}
     
-    # Load the symptoms prediction model
+    # Memuat model prediksi gejala
     model = tf.keras.models.load_model('models/symptoms_predict_model.h5',
                                        custom_objects=custom_objects,
                                        compile=False)
     
-    # Load symptoms index mapping from the main mapping dictionary
-    # Note: Ensure 'symptoms_mapping' is available globally or passed as an argument
     symptoms_idx = {symptom: idx for idx, symptom in enumerate(sorted(symptoms_mapping.values()))}
     
-    # Load disease labels
     with open('models/symptoms_labels.json', 'r') as f:
         disease_mapping = json.load(f)
         
@@ -45,23 +42,23 @@ def load_symptoms_model():
 
 @st.cache_resource
 def load_disease_model():
-    # Custom optimizer configuration
+    # Konfigurasi kustom untuk optimizer Adam
     class CustomAdam(tf.keras.optimizers.Adam):
         def __init__(self, *args, **kwargs):
-            for param in ['weight_decay', 'use_ema', 'ema_momentum', 'ema_overwrite_frequency', 'jit_compile', 'is_legacy_optimizer']:
+            params_to_remove = ['weight_decay', 'use_ema', 'ema_momentum', 'ema_overwrite_frequency', 'jit_compile', 'is_legacy_optimizer']
+            for param in params_to_remove:
                 if param in kwargs:
                     del kwargs[param]
             super().__init__(*args, **kwargs)
     
-    custom_objects = {
-        'CustomAdam': CustomAdam
-    }
+    custom_objects = {'CustomAdam': CustomAdam}
     
     return tf.keras.models.load_model('models/disease-prediction-tf-model.h5',
                                       custom_objects=custom_objects,
                                       compile=False)
 
-# Symptoms mapping dictionary (Indonesian to English)
+# --- DATA MAPPING ---
+
 symptoms_mapping = {
     'gatal': 'itching', 'ruam kulit': 'skin_rash', 'benjolan pada kulit': 'nodal_skin_eruptions',
     'jerawat bernanah': 'pus_filled_pimples', 'komedo': 'blackheads', 'kulit mengelupas': 'skin_peeling',
@@ -117,28 +114,16 @@ symptoms_mapping = {
     'nyeri saat berjalan': 'painful_walking', 'lepuh': 'blister'
 }
 
-def main():
-    st.sidebar.title('Navigation')
-    page = st.sidebar.radio('Go to', ['Disease Prediction', 'Symptoms Analysis', 'Food Detection'])
-    
-    if page == 'Disease Prediction':
-        disease_prediction_page()
-    elif page == 'Symptoms Analysis':
-        symptoms_analysis_page()
-    else:
-        food_detection_page()
+# --- FUNGSI UNTUK SETIAP HALAMAN ---
 
 def symptoms_analysis_page():
     st.title("Analisis Gejala")
     
-    # Load model and mappings
     model, symptoms_idx, disease_mapping = load_symptoms_model()
     
-    # Initialize session state for selected symptoms
     if 'selected_symptoms' not in st.session_state:
         st.session_state.selected_symptoms = []
     
-    # Symptom input section
     col1, col2 = st.columns(2)
     
     with col1:
@@ -147,38 +132,30 @@ def symptoms_analysis_page():
         if st.button("Tambah Gejala"):
             if symptom not in st.session_state.selected_symptoms:
                 st.session_state.selected_symptoms.append(symptom)
-    
+                st.rerun()
+
     with col2:
         st.subheader("Gejala yang dipilih:")
-        # Use a temporary list for safe removal while iterating
-        symptoms_to_remove = []
         for i, symptom in enumerate(st.session_state.selected_symptoms):
             col_left, col_right = st.columns([6,1])
             with col_left:
                 st.write(f"• {symptom}")
             with col_right:
                 if st.button("❌", key=f"remove_{i}"):
-                    symptoms_to_remove.append(symptom)
-
-        if symptoms_to_remove:
-            for symptom in symptoms_to_remove:
-                st.session_state.selected_symptoms.remove(symptom)
-            st.rerun() # Rerun the script to update the UI instantly
-
-    if st.button("Analisis Penyakit"):
+                    st.session_state.selected_symptoms.remove(symptom)
+                    st.rerun()
+    
+    if st.button("Analisis Penyakit", type="primary"):
         if len(st.session_state.selected_symptoms) > 0:
-            # Convert symptoms to model input format (one-hot encoding)
             input_symptoms = np.zeros(132)
             for symptom in st.session_state.selected_symptoms:
                 eng_symptom = symptoms_mapping[symptom]
                 if eng_symptom in symptoms_idx:
                     input_symptoms[symptoms_idx[eng_symptom]] = 1
 
-            # Reshape input and make prediction
             input_symptoms = np.array([input_symptoms])
             predictions = model.predict(input_symptoms)
             
-            # Get top 3 predictions
             top_3_idx = np.argsort(predictions[0])[-3:][::-1]
             
             st.subheader("Hasil Analisis:")
@@ -189,28 +166,20 @@ def symptoms_analysis_page():
         else:
             st.warning("Silakan pilih minimal satu gejala terlebih dahulu.")
 
-def predict_multiple_diseases(symptoms_input, threshold=0.1):
-    # This function is defined but not used in the main workflow.
-    # Implementation would be needed if it were to be used.
-    pass
-
 def calculate_derived_features(height, weight, gender, age, blood_pressure, cholesterol, blood_glucose):
     height_m = height / 100
     bmi = weight / (height_m ** 2) if height_m > 0 else 0
     
-    # Categories
     bmi_category = 0 if bmi < 18.5 else 1 if bmi < 25 else 2 if bmi < 30 else 3
     age_category = 0 if age < 30 else 1 if age < 45 else 2 if age < 60 else 3
     bp_category = 0 if blood_pressure < 120 else 1 if blood_pressure < 140 else 2 if blood_pressure < 160 else 3
     
-    # Interactions
     bmi_age = bmi * age
     bp_age = blood_pressure * age
     bmi_bp = bmi * blood_pressure
     
-    # Nutrition calculations
     sodium = weight * 20
-    fat = weight * (0.15 if gender == 1 else 0.25) # Assuming gender 1 is male
+    fat = weight * (0.15 if gender == 1 else 0.25)
     protein = weight * 0.9
     carbs = weight * 3
     
@@ -225,7 +194,6 @@ def disease_prediction_page():
     st.title('Prediksi Penyakit dari Data Kesehatan')
     st.write('Masukkan data kesehatan Anda untuk mendapatkan prediksi penyakit.')
     
-    # Input form
     col1, col2 = st.columns(2)
     
     with col1:
@@ -239,57 +207,36 @@ def disease_prediction_page():
         cholesterol = st.number_input('Kolesterol Total (mg/dL)', min_value=50, max_value=1000, value=170, step=1)
         blood_glucose = st.number_input('Gula Darah Puasa (mg/dL)', min_value=50, max_value=1000, value=80, step=1)
     
-    if st.button('Analisis Kesehatan'):
-        # Convert gender to binary (1 for Male, 0 for Female)
+    if st.button('Analisis Kesehatan', type="primary"):
         gender_binary = 1 if gender == 'Laki-laki' else 0
         
-        # Calculate derived features
-        derived = calculate_derived_features(
-            height, weight, gender_binary, age,
-            blood_pressure, cholesterol, blood_glucose
-        )
+        derived = calculate_derived_features(height, weight, gender_binary, age, blood_pressure, cholesterol, blood_glucose)
         
-        # Prepare features for the model
         features = np.array([[
-            height, weight, gender_binary, age,
-            blood_pressure, cholesterol, blood_glucose,
-            derived['bmi'], derived['bmi_category'],
-            derived['age_category'], derived['bp_category'],
-            derived['bmi_age'], derived['bp_age'],
-            derived['bmi_bp'], derived['sodium']
+            height, weight, gender_binary, age, blood_pressure, cholesterol, blood_glucose,
+            derived['bmi'], derived['bmi_category'], derived['age_category'], derived['bp_category'],
+            derived['bmi_age'], derived['bp_age'], derived['bmi_bp'], derived['sodium']
         ]])
         
-        # Load model and predict
         model = load_disease_model()
         predictions = model.predict(features)
         
-        # Display results
         res_col1, res_col2 = st.columns(2)
         
         with res_col1:
             st.subheader('Hasil Analisis BMI')
             st.write(f"**BMI**: {derived['bmi']:.1f}")
-            bmi_status = ('Kurus' if derived['bmi'] < 18.5 else 
-                          'Normal' if derived['bmi'] < 25 else 
-                          'Gemuk' if derived['bmi'] < 30 else 'Obesitas')
+            bmi_status = ('Kurus' if derived['bmi'] < 18.5 else 'Normal' if derived['bmi'] < 25 else 'Gemuk' if derived['bmi'] < 30 else 'Obesitas')
             st.write(f"**Status BMI**: {bmi_status}")
             
             st.subheader('Kebutuhan Nutrisi Harian (Estimasi)')
-            st.write(f"Sodium: {derived['sodium']:.1f} mg")
-            st.write(f"Lemak: {derived['fat']:.1f} g")
-            st.write(f"Protein: {derived['protein']:.1f} g")
-            st.write(f"Karbohidrat: {derived['carbs']:.1f} g")
+            st.write(f"Sodium: {derived['sodium']:.1f} mg, Lemak: {derived['fat']:.1f} g, Protein: {derived['protein']:.1f} g, Karbohidrat: {derived['carbs']:.1f} g")
         
         with res_col2:
             st.subheader('Risiko Penyakit')
-            diseases = ['Anemia', 'Kolesterol', 'CKD', 'Diabetes', 'Jantung',
-                        'Hipertensi', 'MS', 'NAFLD', 'Obesitas', 'Stroke']
+            diseases = ['Anemia', 'Kolesterol', 'CKD', 'Diabetes', 'Jantung', 'Hipertensi', 'MS', 'NAFLD', 'Obesitas', 'Stroke']
             
-            # Filter and display diseases with risk > 50%
-            high_risk_diseases = []
-            for disease, prob in zip(diseases, predictions[0]):
-                if prob > 0.5:
-                    high_risk_diseases.append(f"• **{disease}** (Risiko: {prob*100:.1f}%)")
+            high_risk_diseases = [f"• **{disease}** (Risiko: {prob*100:.1f}%)" for disease, prob in zip(diseases, predictions[0]) if prob > 0.5]
             
             if high_risk_diseases:
                 for disease_risk in high_risk_diseases:
@@ -299,18 +246,60 @@ def disease_prediction_page():
 
 def food_detection_page():
     st.title('Deteksi Makanan dari Gambar')
-    st.info("Fitur ini sedang dalam pengembangan.")
-    # Provide link to the GitHub repository for more info
-    st.write("Untuk informasi lebih lanjut tentang model deteksi makanan, "
-             "kunjungi repositori GitHub berikut:")
-    st.markdown("[TFoodDetection oleh Wistchze](https://github.com/Wistchze/TFoodDetection)")
+    st.write("Unggah gambar makanan untuk dideteksi oleh model TFLite.")
 
-@st.cache_resource
-def load_food_model():
-    """Load the food detection model (currently a placeholder)."""
-    # This function is not called but is here for future implementation.
-    # It would load the food detection model, e.g., Mask R-CNN.
-    return tf.keras.models.load_model('models/model_handi/mrcnn_food_detection.h5')
+    tflite_model_path = 'models/bestmodel.tflite'
+
+    uploaded_file = st.file_uploader("Pilih sebuah gambar...", type=["jpg", "jpeg", "png"])
+
+    if not os.path.exists(tflite_model_path):
+        st.error(f"Model tidak ditemukan di path: {tflite_model_path}")
+        st.info("Pastikan Anda telah menempatkan 'bestmodel.tflite' di dalam folder 'models'.")
+        return
+
+    if uploaded_file is not None:
+        image = Image.open(uploaded_file)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.image(image, caption='Gambar yang Diunggah.', use_column_width=True)
+        
+        if st.button('Mulai Deteksi Makanan', type="primary"):
+            with st.spinner('Model sedang memproses gambar...'):
+                interpreter = tf.lite.Interpreter(model_path=tflite_model_path)
+                interpreter.allocate_tensors()
+
+                input_details = interpreter.get_input_details()
+                output_details = interpreter.get_output_details()
+
+                input_shape = input_details[0]['shape']
+                img_resized = image.resize((input_shape[1], input_shape[2]))
+                
+                input_data = np.expand_dims(img_resized, axis=0)
+
+                interpreter.set_tensor(input_details[0]['index'], input_data)
+                interpreter.invoke()
+
+                output_data = interpreter.get_tensor(output_details[0]['index'])
+                
+                with col2:
+                    st.subheader("Hasil Deteksi")
+                    st.write("Output mentah dari model:")
+                    st.write(output_data)
+                    st.info("Anda perlu memproses output ini lebih lanjut untuk menampilkan nama makanan dan kotak pembatas pada gambar.")
+
+# --- FUNGSI UTAMA UNTUK MENJALANKAN APLIKASI ---
+
+def main():
+    st.sidebar.title('Navigasi 🧭')
+    page = st.sidebar.radio('Pilih Halaman', ['Prediksi Penyakit', 'Analisis Gejala', 'Deteksi Makanan'])
+    
+    if page == 'Prediksi Penyakit':
+        disease_prediction_page()
+    elif page == 'Analisis Gejala':
+        symptoms_analysis_page()
+    else:
+        food_detection_page()
 
 if __name__ == '__main__':
     main()
