@@ -36,7 +36,6 @@ def load_models():
         os.makedirs('models')
 
     # --- Model Prediksi Penyakit & Gejala ---
-    # (Untuk penyederhanaan, kita asumsikan model ini ada secara lokal di repo Anda)
     try:
         if os.path.exists('models/disease-prediction-tf-model.h5'):
             disease_model = tf.keras.models.load_model('models/disease-prediction-tf-model.h5')
@@ -86,9 +85,13 @@ if page == "Selamat Datang":
         bmi = profile['weight'] / ((profile['height'] / 100) ** 2)
         st.metric(label="BMI (Indeks Massa Tubuh)", value=f"{bmi:.1f}")
         
-        # Menampilkan risiko tertinggi
-        top_risk_label, top_risk_prob = max(profile['predictions'].items(), key=lambda item: item[1])
-        st.metric(label="Risiko Penyakit Tertinggi", value=top_risk_label, delta=f"{(top_risk_prob*100):.1f}% Risiko", delta_color="inverse")
+        # Menampilkan risiko tertinggi dari data kesehatan
+        if 'predictions_health' in profile:
+            top_risk_label, top_risk_prob = max(profile['predictions_health'].items(), key=lambda item: item[1])
+            st.metric(label="Risiko Penyakit Tertinggi (dari data kesehatan)", value=top_risk_label, delta=f"{(top_risk_prob*100):.1f}% Risiko", delta_color="inverse")
+        # Menampilkan prediksi dari gejala
+        if 'prediction_symptom' in profile:
+             st.metric(label="Prediksi Penyakit (dari gejala)", value=profile['prediction_symptom'])
     else:
         st.info("Anda belum melakukan pemeriksaan kesehatan. Silakan buka halaman 'Prediksi Penyakit' untuk memulai.")
 
@@ -104,7 +107,6 @@ elif page == "Prediksi Penyakit":
     st.write("Masukkan data kesehatan dan gejala Anda untuk mendapatkan analisis.")
 
     with st.form("health_data_form"):
-        # ... (Kode form sama seperti sebelumnya) ...
         st.subheader("Data Diri & Kesehatan")
         col1, col2 = st.columns(2)
         with col1:
@@ -124,46 +126,59 @@ elif page == "Prediksi Penyakit":
         submitted = st.form_submit_button("Analisis & Simpan Profil")
 
     if submitted:
-        if disease_model is not None:
+        if disease_model is not None and symptom_model is not None:
             with st.spinner("Menganalisis data Anda..."):
-                # ... (Logika prediksi sama seperti sebelumnya) ...
+                # --- PREDIKSI BERDASARKAN DATA KESEHATAN ---
                 gender_numeric = 0 if gender == "Perempuan" else 1
                 bmi = weight / ((height / 100) ** 2)
-                disease_input = np.array([[age, gender_numeric, bmi, systolic_bp, cholesterol, fasting_sugar]], dtype=np.float32)
+                health_input = np.array([[age, gender_numeric, bmi, systolic_bp, cholesterol, fasting_sugar]], dtype=np.float32)
                 
-                # --- PERUBAHAN DI SINI ---
-                # Menggunakan pemanggilan langsung pada model, bukan .predict()
-                prediction_tensor = disease_model(disease_input, training=False)
-                disease_prediction = prediction_tensor[0].numpy()
+                health_prediction_tensor = disease_model(health_input, training=False)
+                health_prediction = health_prediction_tensor[0].numpy()
                 
                 disease_labels = ['Diabetes', 'Hipertensi', 'Penyakit Jantung', 'Stroke', 'Obesitas']
-                predictions_dict = {label: float(prob) for label, prob in zip(disease_labels, disease_prediction)}
+                predictions_health_dict = {label: float(prob) for label, prob in zip(disease_labels, health_prediction)}
 
-                # MENYIMPAN DATA KE SESSION STATE
+                # --- PREDIKSI BERDASARKAN GEJALA ---
+                symptom_input = np.zeros((1, len(all_symptoms)), dtype=np.float32)
+                for symptom in selected_symptoms:
+                    if symptom in all_symptoms:
+                        symptom_input[0, all_symptoms.index(symptom)] = 1
+                
+                symptom_prediction_tensor = symptom_model(symptom_input, training=False)
+                symptom_prediction_index = np.argmax(symptom_prediction_tensor[0].numpy())
+                predicted_symptom_label = disease_labels[symptom_prediction_index] # Asumsi labelnya sama
+
+                # MENYIMPAN KEDUA HASIL PREDIKSI KE SESSION STATE
                 st.session_state.user_profile = {
                     "age": age, "height": height, "weight": weight, "gender": gender,
                     "systolic_bp": systolic_bp, "cholesterol": cholesterol,
                     "fasting_sugar": fasting_sugar, "symptoms": selected_symptoms,
-                    "predictions": predictions_dict
+                    "predictions_health": predictions_health_dict,
+                    "prediction_symptom": predicted_symptom_label
                 }
                 
                 st.success("Analisis Selesai! Profil kesehatan Anda telah disimpan untuk sesi ini.")
-                st.subheader("Hasil Prediksi")
-                for label, prob in predictions_dict.items():
+                
+                # Menampilkan hasil
+                st.subheader("Hasil Prediksi dari Data Kesehatan")
+                for label, prob in predictions_health_dict.items():
                     st.write(f"**{label}**")
                     st.progress(int(prob * 100))
                     st.write(f"Risiko: {prob*100:.2f}%")
+
+                st.subheader("Hasil Prediksi dari Gejala")
+                st.info(f"Berdasarkan gejala yang Anda pilih, kemungkinan penyakit yang diderita adalah: **{predicted_symptom_label}**")
         else:
-            st.error("Model prediksi penyakit tidak dapat dimuat.")
+            st.error("Satu atau lebih model prediksi tidak dapat dimuat.")
 
 # --- Halaman 3: Analisis Makanan ---
 elif page == "Analisis Makanan":
     st.header("📸 Analisis Gizi Makanan")
     
-    # Memeriksa apakah profil kesehatan sudah ada
     if not st.session_state.user_profile:
         st.warning("Harap lakukan 'Prediksi Penyakit' terlebih dahulu untuk mendapatkan rekomendasi makanan yang personal.")
-        st.stop() # Menghentikan eksekusi halaman jika profil tidak ada
+        st.stop()
 
     st.write("Unggah foto makanan Anda untuk mendapatkan klasifikasi dan estimasi nutrisi.")
     uploaded_file = st.file_uploader("Pilih gambar...", type=["jpg", "jpeg", "png"])
@@ -175,7 +190,6 @@ elif page == "Analisis Makanan":
         if st.button("Analisis Gambar Ini"):
             if classification_model is not None:
                 with st.spinner("Mengklasifikasikan makanan..."):
-                    # ... (Logika klasifikasi gambar sama seperti sebelumnya) ...
                     input_details = classification_model.get_input_details()
                     output_details = classification_model.get_output_details()
                     height = input_details[0]['shape'][1]
@@ -195,17 +209,13 @@ elif page == "Analisis Makanan":
 
                     st.success(f"Gambar berhasil diklasifikasikan sebagai: **{predicted_label}**")
                     
-                    # Menampilkan rekomendasi personal berdasarkan data kesehatan
                     st.subheader("Rekomendasi Personal Untuk Anda")
                     profile = st.session_state.user_profile
-                    # (Ini adalah contoh logika sederhana, bisa Anda kembangkan)
-                    if predicted_label in ["Rendang", "Nasi Goreng"] and profile['predictions']['Hipertensi'] > 0.5:
+                    if predicted_label in ["Rendang", "Nasi Goreng"] and profile['predictions_health']['Hipertensi'] > 0.5:
                         st.error("Makanan ini cenderung tinggi lemak dan sodium. Kurang disarankan untuk Anda yang berisiko Hipertensi.")
-                    elif predicted_label == "Nasi Goreng" and profile['predictions']['Diabetes'] > 0.6:
+                    elif predicted_label == "Nasi Goreng" and profile['predictions_health']['Diabetes'] > 0.6:
                         st.warning("Porsi nasi yang banyak dapat meningkatkan gula darah. Pertimbangkan porsi yang lebih kecil.")
                     else:
                         st.success("Makanan ini terlihat cukup sesuai dengan profil kesehatan Anda saat ini. Nikmati secukupnya!")
-
-                    # ... (Kode untuk menampilkan gizi sama seperti sebelumnya) ...
             else:
                 st.error("Model klasifikasi makanan tidak dapat dimuat.")
