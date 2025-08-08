@@ -130,7 +130,11 @@ elif page == "Prediksi Penyakit":
                 gender_numeric = 0 if gender == "Perempuan" else 1
                 bmi = weight / ((height / 100) ** 2)
                 disease_input = np.array([[age, gender_numeric, bmi, systolic_bp, cholesterol, fasting_sugar]], dtype=np.float32)
-                disease_prediction = disease_model.predict(disease_input)[0]
+                
+                # --- PERUBAHAN DI SINI ---
+                # Menggunakan pemanggilan langsung pada model, bukan .predict()
+                prediction_tensor = disease_model(disease_input, training=False)
+                disease_prediction = prediction_tensor[0].numpy()
                 
                 disease_labels = ['Diabetes', 'Hipertensi', 'Penyakit Jantung', 'Stroke', 'Obesitas']
                 predictions_dict = {label: float(prob) for label, prob in zip(disease_labels, disease_prediction)}
