@@ -1,263 +1,204 @@
 import streamlit as st
-import tensorflow as tf
-import numpy as np
 import pandas as pd
-import json
-import os
+import numpy as np
+import tensorflow as tf
 from PIL import Image
-import hashlib
-import datetime
+import os
 
 # =====================================================================================
-# 1. KONFIGURASI & SETUP
+# Konfigurasi Halaman dan Judul
 # =====================================================================================
-
 st.set_page_config(
-    page_title="Nutrisense: Solusi Cerdas",
-    page_icon="🥗",
-    layout="centered"
+    page_title="Tilik Nutrisi",
+    page_icon="assets/welcome_image.png", # Ganti dengan path logo Anda jika ada
+    layout="centered",
+    initial_sidebar_state="auto"
 )
 
-# Lokasi file & Inisialisasi folder
-USER_DATA_FILE = "data/users.json"
-SCAN_HISTORY_DIR = "data/scan_history_images/"
-for folder in ["models", "data", SCAN_HISTORY_DIR]:
-    os.makedirs(folder, exist_ok=True)
-if not os.path.exists(USER_DATA_FILE):
-    with open(USER_DATA_FILE, 'w') as f:
-        json.dump({}, f)
-
-# Database Gizi
-NUTRITION_DB = {
-    'apple': {'Kalori': 52, 'Karbohidrat (g)': 14, 'Protein (g)': 0.3, 'Lemak (g)': 0.2},
-    'banana': {'Kalori': 89, 'Karbohidrat (g)': 23, 'Protein (g)': 1.1, 'Lemak (g)': 0.3},
-    'pizza': {'Kalori': 266, 'Karbohidrat (g)': 33, 'Protein (g)': 11, 'Lemak (g)': 10},
-    # Tambahkan item makanan lain sesuai kelas model Anda
-}
-
 # =====================================================================================
-# 2. MANAJEMEN PENGGUNA
+# Fungsi untuk Memuat Model (dengan Caching)
 # =====================================================================================
-def hash_password(password):
-    return hashlib.sha256(str.encode(password)).hexdigest()
-
-def load_users():
-    with open(USER_DATA_FILE, 'r') as f:
-        return json.load(f)
-
-def save_users(users_data):
-    with open(USER_DATA_FILE, 'w') as f:
-        json.dump(users_data, f, indent=4)
-
-# =====================================================================================
-# 3. PEMUATAN MODEL
-# =====================================================================================
-
-# PENTING: Ganti daftar ini dengan nama-nama kelas dari model TFLite Anda,
-# pastikan urutannya benar sesuai saat training.
-FOOD_CLASSES = ['apple', 'banana', 'pizza'] 
-
+# @st.cache_resource digunakan agar model hanya di-load sekali, mempercepat aplikasi
 @st.cache_resource
-def load_tflite_model(model_path):
-    """Memuat model TensorFlow Lite (.tflite)."""
-    if not os.path.exists(model_path):
-        st.error(f"Model TFLite tidak ditemukan di: {model_path}")
-        return None
-    try:
-        interpreter = tf.lite.Interpreter(model_path=model_path)
-        interpreter.allocate_tensors()
-        return interpreter
-    except Exception as e:
-        st.error(f"Gagal memuat model TFLite. Error: {e}")
-        return None
-
-@st.cache_resource
-def load_h5_model(model_path):
-    """Memuat model Keras (.h5)."""
-    if not os.path.exists(model_path):
-        st.error(f"Model H5 tidak ditemukan di: {model_path}")
-        return None
-    try:
-        return tf.keras.models.load_model(model_path, compile=False)
-    except Exception as e:
-        st.error(f"Gagal memuat model H5. Error: {e}")
-        return None
-
-# =====================================================================================
-# 4. HALAMAN-HALAMAN APLIKASI
-# =====================================================================================
-
-def main_dashboard():
-    st.set_page_config(layout="wide")
-    st.sidebar.success(f"Login sebagai: {st.session_state['email']}")
-    page = st.sidebar.radio("Menu Utama", ["🏠 Klasifikasi Makanan", "🔬 Prediksi Risiko Penyakit", "⚙️ Pengaturan"])
+def load_models():
+    """Memuat semua model machine learning dari file."""
+    disease_model = None
+    symptom_model = None
+    classification_model = None
     
-    if page == "🏠 Klasifikasi Makanan":
-        food_classification_page()
-    elif page == "🔬 Prediksi Risiko Penyakit":
-        disease_prediction_page()
-    elif page == "⚙️ Pengaturan":
-        settings_page()
-        
-    if st.sidebar.button("Logout"):
-        st.session_state.logged_in = False
-        st.session_state.email = None
-        st.rerun()
+    try:
+        # Muat model prediksi penyakit
+        if os.path.exists('models/disease-prediction-tf-model.h5'):
+            disease_model = tf.keras.models.load_model('models/disease-prediction-tf-model.h5')
+        else:
+            st.warning("File 'disease-prediction-tf-model.h5' tidak ditemukan. Fitur prediksi penyakit mungkin tidak berfungsi.")
 
-def food_classification_page():
-    st.title("🍕 Klasifikasi Makanan & Info Gizi")
-    st.write("Unggah gambar satu jenis makanan untuk mengetahui nama dan kandungan gizinya.")
+        # Muat model prediksi gejala
+        if os.path.exists('models/symptoms_predict_model.h5'):
+            symptom_model = tf.keras.models.load_model('models/symptoms_predict_model.h5')
+        else:
+            st.warning("File 'symptoms_predict_model.h5' tidak ditemukan. Fitur prediksi gejala mungkin tidak berfungsi.")
+            
+        # Muat model klasifikasi gambar TFLite
+        if os.path.exists('models/bestmodel.tflite'):
+            classification_model = tf.lite.Interpreter(model_path='models/bestmodel.tflite')
+            classification_model.allocate_tensors()
+        else:
+            st.warning("File 'bestmodel.tflite' tidak ditemukan. Fitur analisis makanan tidak akan berfungsi.")
 
-    image_file = st.file_uploader("Pilih file gambar...", type=['jpg', 'jpeg', 'png'])
+    except Exception as e:
+        st.error(f"Gagal memuat salah satu model: {e}")
 
-    if image_file is not None:
-        interpreter = load_tflite_model('models/bestmodel.tflite')
-        if interpreter is None:
-            return
+    return disease_model, symptom_model, classification_model
 
-        image = Image.open(image_file).convert('RGB')
-        
+# Memuat model saat aplikasi dimulai
+disease_model, symptom_model, classification_model = load_models()
+
+# =====================================================================================
+# Halaman Aplikasi (Menggunakan Navigasi Sidebar)
+# =====================================================================================
+st.sidebar.title("Navigasi")
+page = st.sidebar.radio("Pilih Halaman", ["Selamat Datang", "Prediksi Penyakit", "Analisis Makanan"])
+
+# --- Halaman 1: Selamat Datang ---
+if page == "Selamat Datang":
+    st.title("Selamat Datang di Tilik Nutrisi 🥗")
+    st.markdown("""
+    **Solusi cerdas untuk memantau kesehatan dan nutrisi Anda.**
+
+    Aplikasi ini membantu Anda untuk:
+    - **Memprediksi Risiko Penyakit**: Berdasarkan data kesehatan dan gejala yang Anda rasakan.
+    - **Menganalisis Makanan**: Mengetahui estimasi gizi dari foto makanan Anda.
+
+    Gunakan menu navigasi di sebelah kiri untuk memulai.
+    """)
+    try:
+        image = Image.open('assets/welcome_image.png')
+        st.image(image, caption="Ilustrasi oleh AI")
+    except FileNotFoundError:
+        st.info("Letakkan gambar 'welcome_image.png' di folder 'assets/' untuk tampilan yang lebih menarik.")
+
+# --- Halaman 2: Prediksi Penyakit ---
+elif page == "Prediksi Penyakit":
+    st.header("🔬 Prediksi Risiko Penyakit")
+    st.write("Masukkan data kesehatan dan gejala Anda untuk mendapatkan analisis.")
+
+    with st.form("health_data_form"):
+        st.subheader("Data Diri & Kesehatan")
         col1, col2 = st.columns(2)
         with col1:
-            st.image(image, caption="Gambar yang diunggah", use_column_width=True)
-
+            age = st.number_input("Usia", min_value=1, max_value=120, value=30)
+            height = st.number_input("Tinggi Badan (cm)", min_value=50, max_value=250, value=160)
+            systolic_bp = st.number_input("Tekanan Darah Sistolik (mmHg)", min_value=50, max_value=250, value=120)
+            fasting_sugar = st.number_input("Gula Darah Puasa (mg/dL)", min_value=50, max_value=500, value=90)
         with col2:
-            with st.spinner("Mengklasifikasi gambar..."):
-                # Dapatkan detail input dari model TFLite
-                input_details = interpreter.get_input_details()
-                input_shape = input_details[0]['shape']
-                height, width = input_shape[1], input_shape[2]
+            gender = st.selectbox("Jenis Kelamin", ["Perempuan", "Laki-laki"])
+            weight = st.number_input("Berat Badan (kg)", min_value=10, max_value=200, value=60)
+            cholesterol = st.number_input("Kolesterol Total (mg/dL)", min_value=100, max_value=400, value=180)
 
-                # Pre-processing gambar
-                img_resized = image.resize((width, height))
-                img_array = np.array(img_resized, dtype=np.float32)
-                img_array = np.expand_dims(img_array, axis=0)
-                img_array /= 255.0  # Normalisasi jika model Anda dilatih dengan cara ini
+        st.subheader("Analisis Gejala")
+        all_symptoms = ['Sakit kepala', 'Pusing', 'Mual', 'Kelelahan', 'Nyeri dada', 'Sesak napas', 'Sering buang air kecil', 'Haus berlebihan', 'Lapar berlebihan', 'Penglihatan kabur', 'Luka sulit sembuh', 'Kesemutan', 'Kulit pucat', 'Nyeri sendi', 'Demam', 'Pembengkakan kaki', 'Sakit perut', 'Berat badan turun drastis']
+        selected_symptoms = st.multiselect("Pilih gejala yang Anda rasakan:", all_symptoms)
 
-                # Lakukan prediksi
-                interpreter.set_tensor(input_details[0]['index'], img_array)
-                interpreter.invoke()
+        submitted = st.form_submit_button("Analisis Sekarang")
 
-                # Dapatkan hasil
-                output_details = interpreter.get_output_details()
-                output_data = interpreter.get_tensor(output_details[0]['index'])
+    if submitted:
+        if disease_model is not None and symptom_model is not None:
+            with st.spinner("Menganalisis data Anda..."):
+                gender_numeric = 0 if gender == "Perempuan" else 1
+                bmi = weight / ((height / 100) ** 2)
+                disease_input = np.array([[age, gender_numeric, bmi, systolic_bp, cholesterol, fasting_sugar]], dtype=np.float32)
+                symptom_input = np.zeros((1, len(all_symptoms)), dtype=np.float32)
+                for symptom in selected_symptoms:
+                    if symptom in all_symptoms:
+                        symptom_input[0, all_symptoms.index(symptom)] = 1
+
+                disease_prediction = disease_model.predict(disease_input)
+                symptom_prediction = symptom_model.predict(symptom_input)
+
+                st.success("Analisis Selesai!")
+                st.subheader("Hasil Prediksi")
+                disease_labels = ['Diabetes', 'Hipertensi', 'Penyakit Jantung', 'Stroke', 'Obesitas']
+                for i, label in enumerate(disease_labels):
+                    prob = disease_prediction[0][i] * 100
+                    st.write(f"**{label}**")
+                    st.progress(int(prob))
+                    st.write(f"Risiko: {prob:.2f}%")
                 
-                # Proses hasil
-                predicted_index = np.argmax(output_data)
-                confidence = np.max(output_data)
-                predicted_class_name = FOOD_CLASSES[predicted_index]
+                st.write("---")
+                st.write("Berdasarkan gejala, kemungkinan Anda mengalami:")
+                predicted_symptom_disease_index = np.argmax(symptom_prediction)
+                st.info(f"**{disease_labels[predicted_symptom_disease_index]}**")
+        else:
+            st.error("Satu atau lebih model tidak dapat dimuat. Analisis tidak dapat dilanjutkan.")
 
-                st.subheader("✅ Hasil Klasifikasi")
-                st.success(f"**Prediksi:** {predicted_class_name.capitalize()}")
-                st.info(f"**Tingkat Keyakinan:** {confidence:.2%}")
+# --- Halaman 3: Analisis Makanan ---
+elif page == "Analisis Makanan":
+    st.header("📸 Analisis Gizi Makanan")
+    st.write("Unggah foto makanan Anda untuk mendapatkan klasifikasi dan estimasi nutrisi.")
 
-                # Tampilkan info gizi
-                nutrition_info = NUTRITION_DB.get(predicted_class_name.lower())
-                if nutrition_info:
+    uploaded_file = st.file_uploader("Pilih gambar...", type=["jpg", "jpeg", "png"])
+
+    if uploaded_file is not None:
+        image = Image.open(uploaded_file)
+        st.image(image, caption="Gambar yang diunggah", use_column_width=True)
+        st.write("")
+
+        if st.button("Analisis Gambar Ini"):
+            if classification_model is not None:
+                with st.spinner("Mengklasifikasikan makanan..."):
+                    # 1. Pra-pemrosesan Gambar
+                    input_details = classification_model.get_input_details()
+                    output_details = classification_model.get_output_details()
+                    
+                    # Dapatkan ukuran input yang diharapkan model (misal: 224x224)
+                    height = input_details[0]['shape'][1]
+                    width = input_details[0]['shape'][2]
+                    
+                    img_resized = image.resize((width, height))
+                    img_array = np.array(img_resized, dtype=np.float32)
+                    img_array = np.expand_dims(img_array, axis=0)
+                    
+                    # Normalisasi jika diperlukan oleh model (misal: / 255.0)
+                    # Sesuaikan baris ini jika model Anda menggunakan normalisasi yang berbeda
+                    img_array = img_array / 255.0
+
+                    # 2. Lakukan Prediksi dengan TFLite Interpreter
+                    classification_model.set_tensor(input_details[0]['index'], img_array)
+                    classification_model.invoke()
+                    output_data = classification_model.get_tensor(output_details[0]['index'])
+                    
+                    # 3. Tampilkan Hasil
+                    # PENTING: Ganti daftar ini dengan nama kelas/label MAKANAN Anda
+                    # urutannya harus SAMA PERSIS dengan saat training model.
+                    food_labels = ['Nasi Goreng', 'Sate Ayam', 'Bakso', 'Rendang', 'Gado-gado'] 
+                    
+                    predicted_index = np.argmax(output_data)
+                    confidence = output_data[0][predicted_index]
+                    predicted_label = food_labels[predicted_index]
+
+                    st.success(f"Gambar berhasil diklasifikasikan!")
+                    st.subheader("Hasil Klasifikasi")
+                    st.metric(label="Prediksi Makanan", value=predicted_label)
+                    st.metric(label="Tingkat Keyakinan", value=f"{confidence*100:.2f}%")
+
+                    # 4. Tampilkan Estimasi Gizi (berdasarkan hasil klasifikasi)
+                    food_nutrition_db = {
+                        "Nasi Goreng": {"Kalori": 330, "Protein (g)": 10, "Lemak (g)": 15},
+                        "Sate Ayam": {"Kalori": 250, "Protein (g)": 25, "Lemak (g)": 14},
+                        "Bakso": {"Kalori": 280, "Protein (g)": 15, "Lemak (g)": 18},
+                        "Rendang": {"Kalori": 400, "Protein (g)": 23, "Lemak (g)": 28},
+                        "Gado-gado": {"Kalori": 350, "Protein (g)": 18, "Lemak (g)": 22}
+                    }
+
+                    st.write("---")
                     st.subheader("Estimasi Kandungan Gizi")
-                    st.dataframe(pd.DataFrame([nutrition_info]))
-                else:
-                    st.warning("Informasi gizi untuk makanan ini tidak tersedia.")
-
-def disease_prediction_page():
-    # Fungsi ini tetap sama seperti sebelumnya
-    st.title("🔬 Prediksi Risiko Penyakit Kronis")
-    st.write("Prediksi dibuat berdasarkan data kesehatan di profil Anda.")
-    user_data = load_users()[st.session_state['email']]
-    health_data = user_data.get('health_data')
-    if not health_data:
-        st.warning("Lengkapi data kesehatan di halaman Pengaturan.")
-        return
-    st.info("Data kesehatan yang digunakan:"); st.json(health_data)
-    if st.button("Jalankan Prediksi Risiko", type="primary"):
-        model = load_h5_model('models/disease-prediction-tf-model.h5')
-        if model is None: return
-        height = health_data['Tinggi Badan (cm)']; weight = health_data['Berat Badan (kg)']
-        gender_binary = 1 if health_data['Jenis Kelamin'] == 'Laki-laki' else 0
-        age = health_data['Usia']; bp = health_data['Tekanan Darah Sistolik (mmHg)']
-        chol = health_data['Kolesterol Total (mg/dL)']; glucose = health_data['Gula Darah Puasa (mg/dL)']
-        bmi = weight / ((height / 100) ** 2)
-        features = np.array([[height, weight, gender_binary, age, bp, chol, glucose, bmi, 0,0,0,0,0,0,0]]) # Sesuaikan fitur jika perlu
-        predictions = model.predict(features)
-        st.subheader("Potensi Risiko Penyakit:")
-        diseases = ['Anemia', 'Kolesterol Tinggi', 'Gagal Ginjal Kronis', 'Diabetes', 'Penyakit Jantung', 'Hipertensi', 'Sindrom Metabolik', 'Perlemakan Hati', 'Obesitas', 'Stroke']
-        high_risk = [f"• **{diseases[i]}** ({predictions[0][i]*100:.1f}%)" for i, prob in enumerate(predictions[0]) if prob > 0.5]
-        if high_risk:
-            for risk in high_risk: st.error(risk)
-        else: st.success("✅ Tidak ada risiko penyakit kronis yang signifikan terdeteksi.")
-
-def settings_page():
-    # Fungsi ini tetap sama seperti sebelumnya
-    st.title("⚙️ Pengaturan Profil dan Kesehatan")
-    users = load_users(); user_data = users[st.session_state['email']]
-    with st.form("settings_form"):
-        st.subheader("Data Pribadi"); name = st.text_input("Nama", value=user_data.get('name', ''))
-        st.subheader("Data Kesehatan")
-        health_data = user_data.get('health_data', {})
-        h_col1, h_col2 = st.columns(2)
-        with h_col1:
-            height = h_col1.number_input('Tinggi Badan (cm)', 100, value=health_data.get('Tinggi Badan (cm)', 160))
-            weight = h_col1.number_input('Berat Badan (kg)', 30, value=health_data.get('Berat Badan (kg)', 60))
-            gender = h_col1.selectbox('Jenis Kelamin', ['Laki-laki', 'Perempuan'], index=0 if health_data.get('Jenis Kelamin', 'Laki-laki') == 'Laki-laki' else 1)
-        with h_col2:
-            age = h_col2.number_input('Usia', 1, value=health_data.get('Usia', 25))
-            bp = h_col2.number_input('Tekanan Darah Sistolik', 70, value=health_data.get('Tekanan Darah Sistolik (mmHg)', 120))
-            chol = h_col2.number_input('Kolesterol Total', 100, value=health_data.get('Kolesterol Total (mg/dL)', 180))
-            glucose = h_col2.number_input('Gula Darah Puasa', 50, value=health_data.get('Gula Darah Puasa (mg/dL)', 90))
-        if st.form_submit_button("Simpan Perubahan", type="primary"):
-            users[st.session_state['email']]['name'] = name
-            users[st.session_state['email']]['health_data'] = {'Tinggi Badan (cm)': height, 'Berat Badan (kg)': weight, 'Jenis Kelamin': gender, 'Usia': age, 'Tekanan Darah Sistolik (mmHg)': bp, 'Kolesterol Total (mg/dL)': chol, 'Gula Darah Puasa (mg/dL)': glucose}
-            save_users(users); st.success("Data berhasil diperbarui!")
-
-def initial_health_data_entry():
-    # Fungsi ini tetap sama seperti sebelumnya
-    st.title("Satu Langkah Lagi!"); st.header("Masukkan Data Kesehatan Awal Anda")
-    with st.form("initial_health_form"):
-        h_col1, h_col2 = st.columns(2)
-        with h_col1:
-            height=h_col1.number_input('Tinggi Badan (cm)',160); weight=h_col1.number_input('Berat Badan (kg)',60); gender=h_col1.selectbox('Jenis Kelamin',['Laki-laki','Perempuan'])
-        with h_col2:
-            age=h_col2.number_input('Usia',25); bp=h_col2.number_input('Tekanan Darah Sistolik',120); chol=h_col2.number_input('Kolesterol Total',180); glucose=h_col2.number_input('Gula Darah Puasa',90)
-        if st.form_submit_button("Simpan dan Lanjutkan", type="primary"):
-            health_data = {'Tinggi Badan (cm)': height, 'Berat Badan (kg)': weight, 'Jenis Kelamin': gender, 'Usia': age, 'Tekanan Darah Sistolik (mmHg)': bp, 'Kolesterol Total (mg/dL)': chol, 'Gula Darah Puasa (mg/dL)': glucose}
-            users = load_users(); users[st.session_state['email']]['health_data'] = health_data
-            save_users(users); st.rerun()
-
-def auth_page():
-    # Fungsi ini tetap sama seperti sebelumnya
-    st.title("Selamat Datang di Nutrisense 🥗")
-    login_tab, register_tab = st.tabs(["Login", "Register"])
-    with login_tab:
-        with st.form("login_form"):
-            email = st.text_input("Email"); password = st.text_input("Password", type="password")
-            if st.form_submit_button("Login", type="primary"):
-                users = load_users()
-                if email in users and users[email]['password'] == hash_password(password):
-                    st.session_state.logged_in = True; st.session_state.email = email; st.session_state.name = users[email].get('name', email)
-                    st.rerun()
-                else: st.error("Email atau password salah.")
-    with register_tab:
-        with st.form("register_form"):
-            name = st.text_input("Nama Lengkap"); email = st.text_input("Email Baru"); password = st.text_input("Buat Password", type="password"); confirm_password = st.text_input("Konfirmasi Password", type="password")
-            if st.form_submit_button("Register", type="primary"):
-                users = load_users()
-                if email in users: st.error("Email sudah terdaftar.")
-                elif password != confirm_password: st.error("Password tidak cocok.")
-                elif len(password) < 6: st.error("Password minimal 6 karakter.")
-                else:
-                    users[email] = {"password": hash_password(password), "name": name, "health_data": None}
-                    save_users(users); st.success("Registrasi berhasil! Silakan login.")
-
-# =====================================================================================
-# 5. MAIN APP ROUTER
-# =====================================================================================
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-
-if not st.session_state.logged_in:
-    auth_page()
-else:
-    if load_users().get(st.session_state.email, {}).get("health_data") is None:
-        initial_health_data_entry()
-    else:
-        main_dashboard()
+                    if predicted_label in food_nutrition_db:
+                        nutrition_info = food_nutrition_db[predicted_label]
+                        st.json(nutrition_info)
+                    else:
+                        st.warning(f"Informasi gizi untuk '{predicted_label}' belum tersedia di database.")
+                    
+                    st.info("**Disclaimer**: Hasil ini adalah estimasi berdasarkan model AI dan mungkin tidak 100% akurat.")
+            else:
+                st.error("Model klasifikasi makanan tidak dapat dimuat. Analisis tidak dapat dilanjutkan.")
