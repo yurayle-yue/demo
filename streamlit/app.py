@@ -35,13 +35,33 @@ def load_models():
     if not os.path.exists('models'):
         os.makedirs('models')
 
+    # --- Konfigurasi Optimizer Kustom untuk Memuat Model ---
+    # Ini diperlukan jika model disimpan dengan optimizer kustom atau versi yang tidak cocok
+    class CustomAdam(tf.keras.optimizers.Adam):
+        def __init__(self, *args, **kwargs):
+            # Menghapus argumen yang tidak dikenali oleh versi TensorFlow yang lebih lama/baru
+            for param in ['weight_decay', 'use_ema', 'ema_momentum', 'ema_overwrite_frequency', 'jit_compile', 'is_legacy_optimizer']:
+                if param in kwargs:
+                    del kwargs[param]
+            super().__init__(*args, **kwargs)
+    
+    # Mencakup kemungkinan nama optimizer yang berbeda saat disimpan
+    custom_objects = {'CustomAdam': CustomAdam, 'Custom>Adam': CustomAdam}
+
     # --- Model Prediksi Penyakit & Gejala ---
     try:
-        # --- PERUBAHAN DI SINI ---
         if os.path.exists('models/disease-prediction-model.hdf5'):
-            disease_model = tf.keras.models.load_model('models/disease-prediction-model.hdf5')
+            disease_model = tf.keras.models.load_model(
+                'models/disease-prediction-model.hdf5',
+                custom_objects=custom_objects,
+                compile=False
+            )
         if os.path.exists('models/symptoms_predict_model.h5'):
-            symptom_model = tf.keras.models.load_model('models/symptoms_predict_model.h5')
+            symptom_model = tf.keras.models.load_model(
+                'models/symptoms_predict_model.h5',
+                custom_objects=custom_objects,
+                compile=False
+            )
     except Exception as e:
         st.error(f"Gagal memuat model penyakit/gejala: {e}")
             
