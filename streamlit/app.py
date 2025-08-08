@@ -4,21 +4,21 @@ import numpy as np
 import tensorflow as tf
 from PIL import Image
 import os
+import gdown # Import library gdown
 
 # =====================================================================================
 # Konfigurasi Halaman dan Judul
 # =====================================================================================
 st.set_page_config(
     page_title="Tilik Nutrisi",
-    page_icon="assets/welcome_image.png", # Ganti dengan path logo Anda jika ada
+    page_icon="assets/welcome_image.png",
     layout="centered",
     initial_sidebar_state="auto"
 )
 
 # =====================================================================================
-# Fungsi untuk Memuat Model (dengan Caching)
+# Fungsi untuk Memuat Model (dengan Caching dan Download)
 # =====================================================================================
-# @st.cache_resource digunakan agar model hanya di-load sekali, mempercepat aplikasi
 @st.cache_resource
 def load_models():
     """Memuat semua model machine learning dari file."""
@@ -26,28 +26,43 @@ def load_models():
     symptom_model = None
     classification_model = None
     
+    # Pastikan folder 'models' ada
+    if not os.path.exists('models'):
+        os.makedirs('models')
+
+    # --- Model Prediksi Penyakit ---
     try:
-        # Muat model prediksi penyakit
         if os.path.exists('models/disease-prediction-tf-model.h5'):
             disease_model = tf.keras.models.load_model('models/disease-prediction-tf-model.h5')
         else:
-            st.warning("File 'disease-prediction-tf-model.h5' tidak ditemukan. Fitur prediksi penyakit mungkin tidak berfungsi.")
+            st.warning("File 'disease-prediction-tf-model.h5' tidak ditemukan.")
+    except Exception as e:
+        st.error(f"Gagal memuat model penyakit: {e}")
 
-        # Muat model prediksi gejala
+    # --- Model Prediksi Gejala ---
+    try:
         if os.path.exists('models/symptoms_predict_model.h5'):
             symptom_model = tf.keras.models.load_model('models/symptoms_predict_model.h5')
         else:
-            st.warning("File 'symptoms_predict_model.h5' tidak ditemukan. Fitur prediksi gejala mungkin tidak berfungsi.")
-            
-        # Muat model klasifikasi gambar TFLite
-        if os.path.exists('models/bestmodel.tflite'):
-            classification_model = tf.lite.Interpreter(model_path='models/bestmodel.tflite')
-            classification_model.allocate_tensors()
-        else:
-            st.warning("File 'bestmodel.tflite' tidak ditemukan. Fitur analisis makanan tidak akan berfungsi.")
-
+            st.warning("File 'symptoms_predict_model.h5' tidak ditemukan.")
     except Exception as e:
-        st.error(f"Gagal memuat salah satu model: {e}")
+        st.error(f"Gagal memuat model gejala: {e}")
+            
+    # --- Model Klasifikasi Makanan (dengan unduhan dari Google Drive) ---
+    tflite_model_path = 'models/bestmodel.tflite'
+    gdrive_file_id = '1fRrv1FCg8hd2uLyBUbhB0DpI6teixUob' # ID dari link Google Drive Anda
+
+    try:
+        if not os.path.exists(tflite_model_path):
+            st.info("Model klasifikasi makanan tidak ditemukan. Mengunduh dari Google Drive...")
+            with st.spinner("Proses unduh sedang berjalan, ini mungkin memakan waktu beberapa saat..."):
+                gdown.download(id=gdrive_file_id, output=tflite_model_path, quiet=False)
+            st.success("Model klasifikasi makanan berhasil diunduh!")
+
+        classification_model = tf.lite.Interpreter(model_path=tflite_model_path)
+        classification_model.allocate_tensors()
+    except Exception as e:
+        st.error(f"Gagal mengunduh atau memuat model klasifikasi makanan: {e}")
 
     return disease_model, symptom_model, classification_model
 
@@ -147,30 +162,29 @@ elif page == "Analisis Makanan":
         if st.button("Analisis Gambar Ini"):
             if classification_model is not None:
                 with st.spinner("Mengklasifikasikan makanan..."):
-                    # 1. Pra-pemrosesan Gambar
                     input_details = classification_model.get_input_details()
                     output_details = classification_model.get_output_details()
                     
-                    # Dapatkan ukuran input yang diharapkan model (misal: 224x224)
                     height = input_details[0]['shape'][1]
                     width = input_details[0]['shape'][2]
                     
                     img_resized = image.resize((width, height))
                     img_array = np.array(img_resized, dtype=np.float32)
-                    img_array = np.expand_dims(img_array, axis=0)
                     
-                    # Normalisasi jika diperlukan oleh model (misal: / 255.0)
-                    # Sesuaikan baris ini jika model Anda menggunakan normalisasi yang berbeda
+                    # Jika model Anda dilatih dengan gambar RGB (3 channel), pastikan gambar juga 3 channel
+                    if len(img_array.shape) == 2: # Jika grayscale
+                        img_array = np.stack((img_array,)*3, axis=-1)
+                    elif img_array.shape[2] == 4: # Jika punya alpha channel (RGBA)
+                        img_array = img_array[:, :, :3]
+
+                    img_array = np.expand_dims(img_array, axis=0)
                     img_array = img_array / 255.0
 
-                    # 2. Lakukan Prediksi dengan TFLite Interpreter
                     classification_model.set_tensor(input_details[0]['index'], img_array)
                     classification_model.invoke()
                     output_data = classification_model.get_tensor(output_details[0]['index'])
                     
-                    # 3. Tampilkan Hasil
                     # PENTING: Ganti daftar ini dengan nama kelas/label MAKANAN Anda
-                    # urutannya harus SAMA PERSIS dengan saat training model.
                     food_labels = ['Nasi Goreng', 'Sate Ayam', 'Bakso', 'Rendang', 'Gado-gado'] 
                     
                     predicted_index = np.argmax(output_data)
@@ -182,7 +196,6 @@ elif page == "Analisis Makanan":
                     st.metric(label="Prediksi Makanan", value=predicted_label)
                     st.metric(label="Tingkat Keyakinan", value=f"{confidence*100:.2f}%")
 
-                    # 4. Tampilkan Estimasi Gizi (berdasarkan hasil klasifikasi)
                     food_nutrition_db = {
                         "Nasi Goreng": {"Kalori": 330, "Protein (g)": 10, "Lemak (g)": 15},
                         "Sate Ayam": {"Kalori": 250, "Protein (g)": 25, "Lemak (g)": 14},
