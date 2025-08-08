@@ -37,8 +37,9 @@ def load_models():
 
     # --- Model Prediksi Penyakit & Gejala ---
     try:
-        if os.path.exists('models/disease-prediction-tf-model.h5'):
-            disease_model = tf.keras.models.load_model('models/disease-prediction-tf-model.h5')
+        # --- PERUBAHAN DI SINI ---
+        if os.path.exists('models/disease-prediction-model.hdf5'):
+            disease_model = tf.keras.models.load_model('models/disease-prediction-model.hdf5')
         if os.path.exists('models/symptoms_predict_model.h5'):
             symptom_model = tf.keras.models.load_model('models/symptoms_predict_model.h5')
     except Exception as e:
