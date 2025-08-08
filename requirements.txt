@@ -1,6 +1,6 @@
 streamlit
 pandas
-numpy
-tensorflow
+numpy==1.24.4
+tensorflow==2.13.0
 Pillow
 gdown
