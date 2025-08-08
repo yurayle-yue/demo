@@ -67,7 +67,7 @@ disease_model, symptom_model, classification_model = load_models()
 # Halaman Aplikasi
 # =====================================================================================
 st.sidebar.title("Navigasi")
-page = st.sidebar.radio("Pilih Halaman", ["Selamat Datang", "Prediksi Penyakit", "Analisis Makanan"])
+page = st.sidebar.radio("Pilih Halaman", ["Selamat Datang", "Prediksi Penyakit", "Prediksi Gejala", "Analisis Makanan"])
 
 # --- Halaman 1: Selamat Datang ---
 if page == "Selamat Datang":
@@ -82,18 +82,21 @@ if page == "Selamat Datang":
     if st.session_state.user_profile:
         st.subheader("Ringkasan Profil Kesehatan Anda")
         profile = st.session_state.user_profile
-        bmi = profile['weight'] / ((profile['height'] / 100) ** 2)
-        st.metric(label="BMI (Indeks Massa Tubuh)", value=f"{bmi:.1f}")
+        
+        if 'height' in profile and 'weight' in profile:
+            bmi = profile['weight'] / ((profile['height'] / 100) ** 2)
+            st.metric(label="BMI (Indeks Massa Tubuh)", value=f"{bmi:.1f}")
         
         # Menampilkan risiko tertinggi dari data kesehatan
         if 'predictions_health' in profile:
             top_risk_label, top_risk_prob = max(profile['predictions_health'].items(), key=lambda item: item[1])
             st.metric(label="Risiko Penyakit Tertinggi (dari data kesehatan)", value=top_risk_label, delta=f"{(top_risk_prob*100):.1f}% Risiko", delta_color="inverse")
+        
         # Menampilkan prediksi dari gejala
         if 'prediction_symptom' in profile:
              st.metric(label="Prediksi Penyakit (dari gejala)", value=profile['prediction_symptom'])
     else:
-        st.info("Anda belum melakukan pemeriksaan kesehatan. Silakan buka halaman 'Prediksi Penyakit' untuk memulai.")
+        st.info("Anda belum melakukan pemeriksaan kesehatan. Silakan gunakan menu navigasi untuk memulai.")
 
     try:
         image = Image.open('assets/welcome_image.png')
@@ -104,7 +107,7 @@ if page == "Selamat Datang":
 # --- Halaman 2: Prediksi Penyakit ---
 elif page == "Prediksi Penyakit":
     st.header("🔬 Prediksi Risiko Penyakit")
-    st.write("Masukkan data kesehatan dan gejala Anda untuk mendapatkan analisis.")
+    st.write("Masukkan data kesehatan Anda untuk mendapatkan analisis risiko.")
 
     with st.form("health_data_form"):
         st.subheader("Data Diri & Kesehatan")
@@ -118,17 +121,12 @@ elif page == "Prediksi Penyakit":
             gender = st.selectbox("Jenis Kelamin", ["Perempuan", "Laki-laki"])
             weight = st.number_input("Berat Badan (kg)", 10, 200, 60)
             cholesterol = st.number_input("Kolesterol Total (mg/dL)", 100, 400, 180)
-
-        st.subheader("Analisis Gejala")
-        all_symptoms = ['Sakit kepala', 'Pusing', 'Mual', 'Kelelahan', 'Nyeri dada', 'Sesak napas', 'Sering buang air kecil', 'Haus berlebihan', 'Lapar berlebihan', 'Penglihatan kabur', 'Luka sulit sembuh', 'Kesemutan', 'Kulit pucat', 'Nyeri sendi', 'Demam', 'Pembengkakan kaki', 'Sakit perut', 'Berat badan turun drastis']
-        selected_symptoms = st.multiselect("Pilih gejala yang Anda rasakan:", all_symptoms)
         
         submitted = st.form_submit_button("Analisis & Simpan Profil")
 
     if submitted:
-        if disease_model is not None and symptom_model is not None:
+        if disease_model is not None:
             with st.spinner("Menganalisis data Anda..."):
-                # --- PREDIKSI BERDASARKAN DATA KESEHATAN ---
                 gender_numeric = 0 if gender == "Perempuan" else 1
                 bmi = weight / ((height / 100) ** 2)
                 health_input = np.array([[age, gender_numeric, bmi, systolic_bp, cholesterol, fasting_sugar]], dtype=np.float32)
@@ -139,7 +137,42 @@ elif page == "Prediksi Penyakit":
                 disease_labels = ['Diabetes', 'Hipertensi', 'Penyakit Jantung', 'Stroke', 'Obesitas']
                 predictions_health_dict = {label: float(prob) for label, prob in zip(disease_labels, health_prediction)}
 
-                # --- PREDIKSI BERDASARKAN GEJALA ---
+                # Inisialisasi atau update session state
+                if st.session_state.user_profile is None:
+                    st.session_state.user_profile = {}
+                
+                # Menyimpan data kesehatan ke session state
+                st.session_state.user_profile.update({
+                    "age": age, "height": height, "weight": weight, "gender": gender,
+                    "systolic_bp": systolic_bp, "cholesterol": cholesterol,
+                    "fasting_sugar": fasting_sugar,
+                    "predictions_health": predictions_health_dict
+                })
+                
+                st.success("Analisis Selesai! Profil kesehatan Anda telah disimpan untuk sesi ini.")
+                
+                st.subheader("Hasil Prediksi dari Data Kesehatan")
+                for label, prob in predictions_health_dict.items():
+                    st.write(f"**{label}**")
+                    st.progress(int(prob * 100))
+                    st.write(f"Risiko: {prob*100:.2f}%")
+        else:
+            st.error("Model prediksi penyakit tidak dapat dimuat.")
+
+# --- Halaman 3: Prediksi Gejala ---
+elif page == "Prediksi Gejala":
+    st.header("🩺 Prediksi Penyakit Berdasarkan Gejala")
+    st.write("Pilih gejala yang Anda rasakan untuk mendapatkan prediksi.")
+
+    with st.form("symptom_data_form"):
+        all_symptoms = ['Sakit kepala', 'Pusing', 'Mual', 'Kelelahan', 'Nyeri dada', 'Sesak napas', 'Sering buang air kecil', 'Haus berlebihan', 'Lapar berlebihan', 'Penglihatan kabur', 'Luka sulit sembuh', 'Kesemutan', 'Kulit pucat', 'Nyeri sendi', 'Demam', 'Pembengkakan kaki', 'Sakit perut', 'Berat badan turun drastis']
+        selected_symptoms = st.multiselect("Pilih gejala yang Anda rasakan:", all_symptoms)
+        
+        submitted_symptoms = st.form_submit_button("Analisis Gejala")
+
+    if submitted_symptoms:
+        if symptom_model is not None:
+            with st.spinner("Menganalisis gejala Anda..."):
                 symptom_input = np.zeros((1, len(all_symptoms)), dtype=np.float32)
                 for symptom in selected_symptoms:
                     if symptom in all_symptoms:
@@ -147,36 +180,31 @@ elif page == "Prediksi Penyakit":
                 
                 symptom_prediction_tensor = symptom_model(symptom_input, training=False)
                 symptom_prediction_index = np.argmax(symptom_prediction_tensor[0].numpy())
-                predicted_symptom_label = disease_labels[symptom_prediction_index] # Asumsi labelnya sama
+                
+                disease_labels = ['Diabetes', 'Hipertensi', 'Penyakit Jantung', 'Stroke', 'Obesitas'] # Asumsi labelnya sama
+                predicted_symptom_label = disease_labels[symptom_prediction_index]
 
-                # MENYIMPAN KEDUA HASIL PREDIKSI KE SESSION STATE
-                st.session_state.user_profile = {
-                    "age": age, "height": height, "weight": weight, "gender": gender,
-                    "systolic_bp": systolic_bp, "cholesterol": cholesterol,
-                    "fasting_sugar": fasting_sugar, "symptoms": selected_symptoms,
-                    "predictions_health": predictions_health_dict,
+                # Inisialisasi atau update session state
+                if st.session_state.user_profile is None:
+                    st.session_state.user_profile = {}
+
+                # Menyimpan hasil prediksi gejala ke session state
+                st.session_state.user_profile.update({
+                    "symptoms": selected_symptoms,
                     "prediction_symptom": predicted_symptom_label
-                }
-                
-                st.success("Analisis Selesai! Profil kesehatan Anda telah disimpan untuk sesi ini.")
-                
-                # Menampilkan hasil
-                st.subheader("Hasil Prediksi dari Data Kesehatan")
-                for label, prob in predictions_health_dict.items():
-                    st.write(f"**{label}**")
-                    st.progress(int(prob * 100))
-                    st.write(f"Risiko: {prob*100:.2f}%")
+                })
 
+                st.success("Analisis Gejala Selesai!")
                 st.subheader("Hasil Prediksi dari Gejala")
                 st.info(f"Berdasarkan gejala yang Anda pilih, kemungkinan penyakit yang diderita adalah: **{predicted_symptom_label}**")
         else:
-            st.error("Satu atau lebih model prediksi tidak dapat dimuat.")
+            st.error("Model prediksi gejala tidak dapat dimuat.")
 
-# --- Halaman 3: Analisis Makanan ---
+# --- Halaman 4: Analisis Makanan ---
 elif page == "Analisis Makanan":
     st.header("📸 Analisis Gizi Makanan")
     
-    if not st.session_state.user_profile:
+    if not st.session_state.user_profile or 'predictions_health' not in st.session_state.user_profile:
         st.warning("Harap lakukan 'Prediksi Penyakit' terlebih dahulu untuk mendapatkan rekomendasi makanan yang personal.")
         st.stop()
 
