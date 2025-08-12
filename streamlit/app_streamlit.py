@@ -49,6 +49,7 @@ def download_food_model():
 # ====== Load Model Food Detection ======
 @st.cache_resource
 def load_food_model():
+    # Import dari folder lokal mrcnn
     from mrcnn.config import Config
     from mrcnn import model as modellib
 
