@@ -1,6 +1,5 @@
 # tilik_nutrisi.py
 import streamlit as st
-import tensorflow as tf
 import numpy as np
 import json
 import os
@@ -10,24 +9,15 @@ import gdown
 # ====== Konfigurasi App ======
 st.set_page_config(page_title="Tilik Nutrisi", page_icon="🥗", layout="wide")
 
+# ====== Path & URL Model ======
 MODEL_DIR = "models"
+os.makedirs(MODEL_DIR, exist_ok=True)
 MODEL_PATH = os.path.join(MODEL_DIR, "mrcnn_food_detection.h5")
 MODEL_DRIVE_URL = "https://drive.google.com/uc?id=1sVzG18PNoUrwxctxIMIoQL79bCWjhnSY&export=download"
+
 USER_DB = "users.json"
 
-os.makedirs(MODEL_DIR, exist_ok=True)
-
-# ====== Helper ======
-def download_food_model():
-    if not os.path.exists(MODEL_PATH):
-        with st.spinner("Mengunduh model deteksi makanan..."):
-            gdown.download(MODEL_DRIVE_URL, MODEL_PATH, quiet=False)
-
-@st.cache_resource
-def load_food_model():
-    download_food_model()
-    return tf.keras.models.load_model(MODEL_PATH, compile=False)
-
+# ====== Helper untuk User ======
 def load_users():
     if os.path.exists(USER_DB):
         with open(USER_DB, "r") as f:
@@ -49,6 +39,33 @@ def register_user(username, email, password):
     users[email] = {"username": username, "password": password}
     save_users(users)
     return True
+
+# ====== Download Model Food Detection ======
+def download_food_model():
+    if not os.path.exists(MODEL_PATH):
+        with st.spinner("Mengunduh model Mask R-CNN..."):
+            gdown.download(MODEL_DRIVE_URL, MODEL_PATH, quiet=False)
+
+# ====== Load Model Food Detection ======
+@st.cache_resource
+def load_food_model():
+    from mrcnn.config import Config
+    from mrcnn import model as modellib
+
+    class InferenceConfig(Config):
+        NAME = "food_cfg"
+        NUM_CLASSES = 1 + 80  # 1 background + jumlah kelas (ubah sesuai model)
+        GPU_COUNT = 1
+        IMAGES_PER_GPU = 1
+
+    config = InferenceConfig()
+
+    download_food_model()
+
+    model = modellib.MaskRCNN(mode="inference", model_dir=MODEL_DIR, config=config)
+    model.load_weights(MODEL_PATH, by_name=True)
+
+    return model
 
 # ====== Halaman ======
 def page_welcome():
@@ -101,28 +118,24 @@ def page_food_detection():
     st.title("🍲 Food Detection")
     st.write("Ambil gambar dari kamera atau unggah dari galeri.")
 
-    # Input kamera
     camera_img = st.camera_input("Ambil foto makanan")
     upload_img = st.file_uploader("Atau unggah gambar", type=["jpg", "jpeg", "png"])
 
     img = None
     if camera_img:
-        img = Image.open(camera_img)
+        img = Image.open(camera_img).convert("RGB")
     elif upload_img:
-        img = Image.open(upload_img)
+        img = Image.open(upload_img).convert("RGB")
 
     if img is not None:
         st.image(img, caption="Gambar yang dipilih", use_column_width=True)
         if st.button("Deteksi Makanan"):
             model = load_food_model()
-            img_resized = img.resize((224, 224))
-            arr = np.array(img_resized).astype(np.float32)/255.0
-            x = np.expand_dims(arr, axis=0)
-            try:
-                preds = model.predict(x)
-                st.success(f"Prediksi berhasil. Output shape: {np.array(preds).shape}")
-            except Exception as e:
-                st.error(f"Error prediksi: {e}")
+            results = model.detect([np.array(img)], verbose=0)
+            r = results[0]
+            st.write("Jumlah objek terdeteksi:", len(r["class_ids"]))
+            st.write("Class IDs:", r["class_ids"].tolist())
+            st.write("Scores:", r["scores"].tolist())
 
 def page_nutrition_recommendation():
     st.title("🥦 Nutrition Recommendation")
